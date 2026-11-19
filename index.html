@@ -1,31 +1,144 @@
 <!DOCTYPE html>
-<!-- A placeholder from the Home Sales template. Replace this file with your site's first page. -->
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Under construction</title>
-  <!-- An empty icon, so the browser doesn't log an error looking for favicon.ico -->
+  <title>Median home sale prices by city</title>
   <link rel="icon" href="data:,">
   <style>
-    :root { color-scheme: light dark; }
-    body {
-      max-width: 40rem;
-      margin: 0 auto;
-      padding: 3rem 1rem;
-      font-family: system-ui, sans-serif;
-      line-height: 1.5;
+    :root {
+      color-scheme: light;
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: #17202a;
+      background: #f4f7f9;
     }
-    footer { margin-top: 3rem; font-size: 0.875rem; opacity: 0.75; }
+    body { margin: 0; }
+    main { max-width: 62rem; margin: 0 auto; padding: 3rem 1rem; }
+    h1 { margin: 0 0 0.75rem; font-size: clamp(2rem, 5vw, 3.25rem); }
+    .intro { max-width: 42rem; color: #53616d; font-size: 1.1rem; }
+    .note {
+      margin: 2rem 0 1.25rem;
+      padding: 1rem 1.25rem;
+      border-left: 0.3rem solid #1769aa;
+      background: #e8f2fa;
+    }
+    .table-wrap {
+      overflow-x: auto;
+      background: #fff;
+      border: 1px solid #d5dde3;
+      border-radius: 0.5rem;
+      box-shadow: 0 0.25rem 1rem rgb(23 32 42 / 7%);
+    }
+    table { width: 100%; border-collapse: collapse; }
+    caption { padding: 1rem; text-align: left; font-weight: 700; }
+    th, td { padding: 0.8rem 1rem; border-top: 1px solid #e6ebef; }
+    th { color: #53616d; font-size: 0.85rem; text-align: left; text-transform: uppercase; letter-spacing: 0.04em; }
+    th:last-child, td:last-child { text-align: right; }
+    td:last-child { font-variant-numeric: tabular-nums; font-weight: 650; }
+    .status { padding: 1rem; color: #53616d; }
+    .error { color: #a32626; }
+    footer { margin-top: 2rem; color: #53616d; font-size: 0.9rem; }
   </style>
 </head>
 <body>
   <main>
-    <h1>This site is under construction</h1>
-    <p>It will show findings from the College-town home sales dataset.</p>
+    <h1>Median home sale prices by city</h1>
+    <p class="intro">How much did a typical home sell for in each college town? These medians are calculated from the College-town home sales dataset as the page loads.</p>
+    <p class="note"><strong>Price rule:</strong> Sales under $10,000 are left out because the data description identifies them as impossible prices.</p>
+    <div class="table-wrap">
+      <table>
+        <caption>Median sale price, by city</caption>
+        <thead>
+          <tr><th scope="col">City</th><th scope="col">State</th><th scope="col">Sales included</th><th scope="col">Median sale price</th></tr>
+        </thead>
+        <tbody id="results">
+          <tr><td class="status" colspan="4">Loading data...</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <footer>
+      <p>Source: College-town home sales dataset, version 1.0 (2026). Data collected March 2026.</p>
+    </footer>
   </main>
-  <footer>
-    <p>Data: College-town home sales dataset, version 1.0 (2026). University of Illinois-Deloitte Foundation Center for Business Emerging Technologies. Data collected March 2026.</p>
-  </footer>
+  <script>
+    const results = document.querySelector("#results");
+    const currency = new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: "USD",
+      maximumFractionDigits: 0
+    });
+
+    function parseCsv(text) {
+      const rows = [];
+      let row = [];
+      let field = "";
+      let quoted = false;
+      for (let i = 0; i < text.length; i += 1) {
+        const character = text[i];
+        if (character === '"') {
+          if (quoted && text[i + 1] === '"') {
+            field += '"';
+            i += 1;
+          } else {
+            quoted = !quoted;
+          }
+        } else if (character === "," && !quoted) {
+          row.push(field);
+          field = "";
+        } else if ((character === "\n" || character === "\r") && !quoted) {
+          if (character === "\r" && text[i + 1] === "\n") i += 1;
+          row.push(field);
+          if (row.some((value) => value !== "")) rows.push(row);
+          row = [];
+          field = "";
+        } else {
+          field += character;
+        }
+      }
+      if (field !== "" || row.length) {
+        row.push(field);
+        rows.push(row);
+      }
+      const headers = rows.shift();
+      return rows.map((values) => Object.fromEntries(headers.map((header, index) => [header, values[index] ?? ""])));
+    }
+
+    function median(values) {
+      values.sort((a, b) => a - b);
+      const middle = Math.floor(values.length / 2);
+      return values.length % 2 ? values[middle] : (values[middle - 1] + values[middle]) / 2;
+    }
+
+    async function showMedians() {
+      const response = await fetch("data/college_town_home_sales.csv");
+      if (!response.ok) throw new Error(`Could not load the data (${response.status}).`);
+      const sales = parseCsv(await response.text());
+      const byCity = new Map();
+      sales.forEach((sale) => {
+        const price = Number(sale.sale_price);
+        if (!Number.isFinite(price) || price < 10000) return;
+        const key = `${sale.city}|${sale.state}`;
+        if (!byCity.has(key)) byCity.set(key, { city: sale.city, state: sale.state, prices: [] });
+        byCity.get(key).prices.push(price);
+      });
+
+      const rows = [...byCity.values()]
+        .sort((a, b) => a.city.localeCompare(b.city))
+        .map(({ city, state, prices }) => `
+          <tr>
+            <td>${city}</td>
+            <td>${state}</td>
+            <td>${prices.length.toLocaleString("en-US")}</td>
+            <td>${currency.format(median(prices))}</td>
+          </tr>
+        `)
+        .join("");
+      results.innerHTML = rows || '<tr><td class="status" colspan="4">No qualifying sales found.</td></tr>';
+    }
+
+    showMedians().catch((error) => {
+      results.innerHTML = `<tr><td class="status error" colspan="4">${error.message}</td></tr>`;
+    });
+  </script>
 </body>
 </html>
